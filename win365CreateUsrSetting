@@ -1,0 +1,33 @@
+#############################################################################################
+# Windows 365 Cloud Create User Settings via Powershell
+# Comment or Un-comment the components that does not apply to your environment
+# Author - Aresh Sarkari - https://twitter.com/askaresh
+#############################################################################################
+
+#Install Microsoft Graph Module
+Install-Module Microsoft.Graph
+
+#Read-only  Scope
+Connect-MgGraph -Scopes "CloudPC.Read.All"
+
+#Read-Write Scope
+Connect-MgGraph -Scopes "CloudPC.ReadWrite.All"
+
+#Beta APIs
+Select-MgProfile -Name "beta"
+
+#Production APIs
+Select-MgProfile -Name "v1.0"
+
+$params = @{
+	"@odata.type" = "#microsoft.graph.cloudPcUserSetting"
+	DisplayName = "CPC-UserSettings02"
+	SelfServiceEnabled = $false
+	LocalAdminEnabled = $false
+	RestorePointSetting = @{
+		FrequencyInHours = 6
+		UserRestoreEnabled = $true
+	}
+}
+
+New-MgDeviceManagementVirtualEndpointUserSetting -BodyParameter $params
