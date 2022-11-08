@@ -1,0 +1,36 @@
+#############################################################################################
+# Windows 365 Cloud Assign User Settings via Powershell
+# Comment or Un-comment the components that does not apply to your environment
+# Author - Aresh Sarkari - https://twitter.com/askaresh
+#############################################################################################
+
+#Install Microsoft Graph Module
+Install-Module Microsoft.Graph
+
+#Read-only  Scope
+Connect-MgGraph -Scopes "CloudPC.Read.All"
+
+#Read-Write Scope
+Connect-MgGraph -Scopes "CloudPC.ReadWrite.All"
+
+#Beta APIs
+Select-MgProfile -Name "beta"
+
+#Production APIs
+Select-MgProfile -Name "v1.0"
+
+$cloudPcUserSettingId = "ed7271e3-8844-XXXX-XXXX-9bc8bd70da4c"
+
+$params = @{
+	Assignments = @(
+		@{
+			Id = "ed7271e3-8844-XXXX-XXXX-9bc8bd70da4c"
+			Target = @{
+				"@odata.type" = "microsoft.graph.cloudPcManagementGroupAssignmentTarget"
+				GroupId = "01eecc64-c3bb-XXXX-XXXX-bafb18feef12"
+			}
+		}
+	)
+}
+
+Set-MgDeviceManagementVirtualEndpointUserSetting -CloudPcUserSettingId $cloudPcUserSettingId -BodyParameter $params
