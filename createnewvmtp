@@ -1,0 +1,102 @@
+# Step 1: Import module
+#Import-Module Az.Accounts
+
+# Connect to the Azure Subcription
+#Connect-AzAccount
+
+# Get existing context
+$currentAzContext = Get-AzContext
+
+# Your subscription. This command gets your current subscription
+$subscriptionID=$currentAzContext.Subscription.Id
+
+# Command to get the Multi-session Image in Gallery
+# Details from this command will help in filling out variables below on Gallery Image
+# Get-AzVMImageSku -Location australiaeast -PublisherName MicrosoftWindowsDesktop -Offer windows-11
+
+# Existing Resource Group to deploy the VM
+$rgName = "AZ104-RG"
+
+# Geo Location to deploy the VM
+$location = "Australia East"
+
+# Image template name
+$vmName = "VM03"
+
+# Networking Interfance Name for the VM
+$nicName = "$vmName-nic"
+
+# Resource Group for VNET
+$vnetrgName = "AZ104-RG"
+
+# Existing Subnet Name
+$Existsubnetname = "AZ104-VDI-Workload-L1"
+
+# Existing VNET Name
+$Existvnetname = "AZ104-RG-vnet"
+
+# Existing VNET where we are deploying this Virtual Machine
+$vnet = Get-AzVirtualNetwork -Name $Existvnetname -ResourceGroupName $vnetrgName
+
+# Existing Subnet within the VNET for the this virtual machine
+$subnet = Get-AzVirtualNetworkSubnetConfig -Name $Existsubnetname -VirtualNetwork $vnet
+
+# T-shirt size of the VM
+$vmSize = "Standard_D2s_v3"
+
+# Gallery Publisher of the Image - Microsoft
+$publisher = "MicrosoftWindowsDesktop"
+
+# Version of Windows 10/11
+$offer = "windows-11"
+
+# The SKY ending with avd are the multi-session
+$sku = "win11-22h2-avd"
+
+# Choosing the latest version
+$version = "latest"
+
+# Setting up the Local Admin on the VM
+$cred = Get-Credential `
+   -Message "Enter a username and password for the virtual machine."
+
+# Create New network interface for the virtual machine
+$NIC = New-AzNetworkInterface -Name $nicName -ResourceGroupName $vnetrgName -Location $location -Subnet $subnet
+
+# Creation of the new virtual machine with delete option for Disk/NIC together
+$vm = New-AzVMConfig -VMName $vmName -VMSize $vmSize 
+
+$vm = Set-AzVMOperatingSystem `
+   -VM $vm -Windows `
+   -ComputerName $vmName `
+   -Credential $cred `
+   -ProvisionVMAgent `
+   -EnableAutoUpdate 
+
+# Delete option for NIC
+$vm = Add-AzVMNetworkInterface -VM $vm `
+   -Id $NIC.Id `
+   -DeleteOption "Delete"
+
+$vm = Set-AzVMSourceImage -VM $vm `
+   -PublisherName $publisher `
+   -Offer $offer `
+   -Skus $sku `
+   -Version $version 
+
+# Delete option for Disk
+$vm = Set-AzVMOSDisk -VM $vm `
+   -StorageAccountType "StandardSSD_LRS" `
+   -CreateOption "FromImage" `
+   -DeleteOption "Delete"
+
+# The sauce around enabling the Trusted Platform
+$vm = Set-AzVmSecurityProfile -VM $vm `
+   -SecurityType "TrustedLaunch" 
+
+# The sauce around enabling TPM and Secure Boot
+$vm = Set-AzVmUefi -VM $vm `
+   -EnableVtpm $true `
+   -EnableSecureBoot $true 
+
+New-AzVM -ResourceGroupName $rgName -Location $location -VM $vm
