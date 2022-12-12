@@ -67,7 +67,7 @@ try
         -Name $AppGrpName `
         -Location $location `
         -HostPoolArmPath $DeployHPWDesk.Id `
-        -ApplicationGroupType 'Desktop' `
+        -ApplicationGroupType $AppGrpType `
         -ErrorAction STOP
 }
 catch
