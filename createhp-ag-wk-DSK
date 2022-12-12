@@ -1,0 +1,108 @@
+ Connect to the Azure Subcription
+Connect-AzAccount
+
+# Get existing context
+$currentAzContext = Get-AzContext
+
+# Your subscription. This command gets your current subscription
+$subscriptionID = $currentAzContext.Subscription.Id
+
+# Existing Resource Group to deploy the Host Pool
+$rgName = "AZ104-RG"
+
+# Geo Location to deploy the Host Pool
+$location = "australiaeast"
+
+# Host Pool name
+$HPName = "D-HP01"
+
+# Host Pool Type Pooled|Personal
+$HPType = "Pooled"
+
+# Host Pool Load Balancing BreadthFirst|DepthFirst|Persistent
+$HPLBType = "DepthFirst"
+
+# Max number or users per session host
+$Maxusers = "10"
+
+# Preffered App group type Desktop|RailApplications
+$AppGrpType = "Desktop"
+
+# ApplicationGroup Name
+$AppGrpName = "$HPName-DAG"
+
+# Workspace Name
+$Wrkspace = "$HPName-WRK01"
+
+# AAD Group used to assign the Application Group
+# Copy the Object ID GUID from AAD Groups Blade
+$AADGroupObjId = "dccXXXXX-2f2d-XXXX-XXXX-33768d8bXXXX"
+
+# Create the Host Pool with Desktop Configurations
+try
+{
+    write-host "Create the Host Pool with Pooled Desktop Configurations"
+    $DeployHPWDesk = New-AzWvdHostPool -ResourceGroupName $rgName `
+        -SubscriptionId $subscriptionID `
+        -Name $HPName `
+        -Location $location `
+        -ValidationEnvironment:$true `
+        -HostPoolType $HPType `
+        -LoadBalancerType $HPLBType `
+        -MaxSessionLimit $Maxusers `
+        -PreferredAppGroupType $AppGrpType `
+        -Tag:@{"Billing" = "IT"; "Department" = "IT"; "Location" = "AUS-East" } `
+        -ErrorAction STOP
+}
+catch
+{
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+}
+
+# Create the Application Group for the Desktop Host Pool
+try
+{
+    write-host "Create the Application Group for the Desktop Host Pool"
+    $CreateAppGroupDesk = New-AzWvdApplicationGroup -ResourceGroupName $rgName `
+        -Name $AppGrpName `
+        -Location $location `
+        -HostPoolArmPath $DeployHPWDesk.Id `
+        -ApplicationGroupType 'Desktop' `
+        -ErrorAction STOP
+}
+catch
+{
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+}
+    
+
+# Create the Workspace for the Desktop Host Pool
+try
+{
+    write-host "Create the Workspace for the Desktop Host Pool"
+    $CreateWorkspaceDesk = New-AzWvdWorkspace -ResourceGroupName $rgName `
+        -Name $Wrkspace `
+        -Location $location `
+        -ApplicationGroupReference $CreateAppGroupDesk.Id `
+        -ErrorAction STOP
+}
+catch
+{
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+}
+
+# Assign the AAD group (Object ID)  to the Application Group
+try
+{
+    write-host "Assigning the AAD Group to the Application Group"
+    $AssignAADGrpAG = New-AzRoleAssignment -ObjectId $AADGroupObjId `
+        -RoleDefinitionName "Desktop Virtualization User" `
+        -ResourceName $CreateAppGroupDesk.Name `
+        -ResourceGroupName $rgName `
+        -ResourceType 'Microsoft.DesktopVirtualization/applicationGroups' `
+        -ErrorAction STOP
+}
+catch
+{
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+}
