@@ -31,6 +31,7 @@ $params = @{
 	ImageDisplayName = "Windows 11 Enterprise + OS Optimizations 22H2"
 	ImageId = "MicrosoftWindowsDesktop_windows-ent-cpc_win11-22h2-ent-cpc-os"
 	ImageType = "gallery"
+	enableSingleSignOn = "true"
 	WindowsSettings = @{
 		Language = "en-US"
 	}
