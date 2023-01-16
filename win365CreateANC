@@ -1,0 +1,64 @@
+# Import module Az and MS Graph
+Import-Module Az.Accounts
+Install-Module Microsoft.Graph
+
+# Connect to the Azure Subcription
+Connect-AzAccount
+
+# Get existing context
+$currentAzContext = Get-AzContext
+
+# Your subscription. This command gets your current subscription
+$subscriptionID = $currentAzContext.Subscription.Id
+
+# Your subscription. This command gets your current subscription name
+$subscriptionName = $currentAzContext.Subscription.Name
+
+# ANC Display Name
+$ancdname = "ANC-W365-Sub01"
+
+# Join Ype for the Azure Network Connection
+# Two types Azure AD and Hyrbird "azureADJoin" or "hybridAzureADJoin"
+$ancjointype = "azureADJoin"
+
+# Get your Win365 Resouce Group id for RG Name - W365-AVD-RG01
+# Put your RG Name
+$win365RGID = Get-AzResourceGroup -Name "W365-AVD-RG01" | Select-Object -ExpandProperty ResourceId
+
+# Get your Azure VNET id used for Windows 365 Cloud PC
+# Put your VNET Name
+$win365VNETID = Get-AzVirtualNetwork -Name "W365-AVD-VNET01" | Select-Object -ExpandProperty Id
+
+# Get your Subnet ID within the Azure VNET for Windows 365 Cloud PC
+# Put your VNET Name
+$win365VNET = Get-AzVirtualNetwork -Name "W365-AVD-VNET01"
+
+# Enter your Subnet Name
+$win365SubID = Get-AzVirtualNetworkSubnetConfig -Name "W365Workload-Sub01" -VirtualNetwork $win365VNET | Select-Object -ExpandProperty Id
+
+# Connec to MS Graph for Cloud PC W365
+Connect-MgGraph -Scopes "CloudPC.ReadWrite.All"
+
+# Select Beta Profile for Cloud PC APIs
+Select-MgProfile -Name "beta"
+
+# Create the ANC for Windows 365 with AAD join type
+try
+{
+write-host "Create the ANC for Windows 365 with AAD join type"
+$params = @{
+    displayName = "$ancdname"
+    subscriptionId = "$subscriptionID"
+    type = "$ancjointype"
+    subscriptionName = "$subscriptionName"
+    resourceGroupId = "$win365RGID"
+    virtualNetworkId = "$win365VNETID"
+    subnetId = "$win365SubID"
+}
+
+New-MgDeviceManagementVirtualEndpointOnPremisesConnection -BodyParameter $params -Debug
+}
+catch
+{
+    Write-Host $_.Exception.Message -ForegroundColor Yellow
+}
