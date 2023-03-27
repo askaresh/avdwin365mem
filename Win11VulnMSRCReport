@@ -1,0 +1,88 @@
+### Install the module
+#Install-Module MSRCSecurityUpdates -Force
+
+### Load the module
+Import-Module -Name MsrcSecurityUpdates
+
+#Email Details
+$Recipients = "askaresh@askaresh.com", "someone@askaresh.com"
+$Sender = "cve-report@askaresh.com"
+$SMTP_Server = "smtp.askaresh.com"
+$Subject = 'CVE List for Windows 11 22H2 on '+$Month
+
+#Month Format for MSRC
+$Month = Get-Date -Format 'yyyy-MMM'
+
+# Enter the Operating System you specifically want to focus on
+$ClientOS_Type = "Windows 11 Version 22H2 for x64-based Systems"
+
+# Environment Variables
+$Css="<style>
+body {
+    font-family: cursive;
+    font-size: 14px;
+    color: #000000;
+    background: #FEFEFE;
+}
+#title{
+    color:#000000;
+    font-size: 30px;
+    font-weight: bold;
+    height: 50px;
+    margin-left: 0px;
+    padding-top: 10px;
+}
+
+#subtitle{
+    font-size: 16px;
+    margin-left:0px;
+    padding-bottom: 10px;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+}
+table td, table th {
+    border:1px solid #000000;
+    padding:3px 7px 2px 7px;
+}
+table th {
+    text-align:center;
+    padding-top:5px;
+    padding-bottom:4px;
+    background-color:#000000;
+    color:#fff;
+}
+table tr.alt td {
+    color:#000;
+    background-color:#EAF2D3;
+}
+tr.critical {
+    color: white;
+    background-color: red;
+}
+</style>"
+$Title = "<span style='font-weight:bold;font-size:24pt'>CVE List for Windows 11 22H2 on " + $Month + "</span>"
+$Logo = "<img src='C:\Scripts\WinSvr\askareshlogo.png' alt='Logo' height='100' width='100'>"
+$Header = "<div id='banner'>$Logo</div>`n" +
+          "<div id='title'>$Title</div>`n" +
+          "<div id='subtitle'>Report generated: $(Get-Date)</div>"
+
+
+#Main Script Logic
+$ID = Get-MsrcCvrfDocument -ID $Month
+$ProductName = Get-MsrcCvrfAffectedSoftware -Vulnerability $id.Vulnerability -ProductTree $id.ProductTree | Where-Object { $_.Severity -in 'Critical', 'Important' -and ($_.FullProductName -match $ClientOS_Type) }
+
+
+$Report = $ProductName | Select CVE, FullProductName, Severity, Impact, @{Name='KBArticle'; Expression={($_.KBArticle.ID | Select-Object -Unique) -join ', '}}, @{Name='BaseScore'; Expression={$_.CvssScoreSet.Base}}, @{Name='TemporalScore'; Expression={$_.CvssScoreSet.Temporal}}, @{Name='Vector'; Expression={$_.CvssScoreSet.Vector}} | ConvertTo-Html -PreContent $Css -PostContent "</table><br>" -As Table -Fragment | ForEach-Object {
+    if($_ -match "<td.*?Critical.*?>") {
+        $_ -replace "<tr>", "<tr class='critical'>"
+    }
+    else {
+        $_
+    }
+}
+
+#Send Email
+Send-MailMessage -To $recipients -From $Sender -Subject $Subject -Body "$Header $Report" -SmtpServer $SMTP_Server -BodyAsHtml
