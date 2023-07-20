@@ -1,0 +1,39 @@
+#DomainName
+$DomainName = "askaresh.com"
+
+# Initialize matchlist
+$matchlist = @()
+
+# Collect all GPOs
+$GPOs = Get-GPO -All -Domain $DomainName
+
+# Read search strings from text file
+# A list of GPOs settings you want to search
+$SearchStrings = Get-Content -Path "C:\Temp\inputgpo.txt"
+
+# Hunt through each GPO XML for each search string
+foreach ($searchString in $SearchStrings) {
+    $found = $false
+    foreach ($gpo in $GPOs) {
+        $GPOReport = Get-GPOReport -Guid $gpo.Id -ReportType Xml
+        if ($GPOReport -match $searchString) {
+            $match = New-Object PSObject -Property @{
+                "SearchString" = $searchString
+                "GPOName" = $gpo.DisplayName
+            }
+            $matchlist += $match
+            $found = $true
+        }
+    }
+    if (-not $found) {
+        $match = New-Object PSObject -Property @{
+            "SearchString" = $searchString
+            "GPOName" = "No results found"
+        }
+        $matchlist += $match
+    }
+}
+
+# Output results to CSV, Search results
+# This step will take time depending how many 100's or 1000's policies present in the environment
+$matchlist | Export-Csv -Path "C:\Temp\gposearch.csv" -NoTypeInformation
