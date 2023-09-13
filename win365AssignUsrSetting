@@ -5,19 +5,13 @@
 #############################################################################################
 
 #Install Microsoft Graph Module
-Install-Module Microsoft.Graph
+Install-Module Microsoft.Graph.Beta
 
 #Read-only  Scope
 Connect-MgGraph -Scopes "CloudPC.Read.All"
 
 #Read-Write Scope
 Connect-MgGraph -Scopes "CloudPC.ReadWrite.All"
-
-#Beta APIs
-Select-MgProfile -Name "beta"
-
-#Production APIs
-Select-MgProfile -Name "v1.0"
 
 $cloudPcUserSettingId = "ed7271e3-8844-XXXX-XXXX-9bc8bd70da4c"
 
@@ -33,4 +27,4 @@ $params = @{
 	)
 }
 
-Set-MgDeviceManagementVirtualEndpointUserSetting -CloudPcUserSettingId $cloudPcUserSettingId -BodyParameter $params
+Set-MgBetaDeviceManagementVirtualEndpointUserSetting -CloudPcUserSettingId $cloudPcUserSettingId -BodyParameter $params
