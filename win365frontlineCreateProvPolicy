@@ -13,12 +13,6 @@ Connect-MgGraph -Scopes "CloudPC.Read.All"
 #Read-Write Scope
 Connect-MgGraph -Scopes "CloudPC.ReadWrite.All"
 
-#Beta APIs
-Select-MgProfile -Name "beta"
-
-#Production APIs
-Select-MgProfile -Name "v1.0"
-
 $params = @{
 	displayName = "Demo-FrontLine"
 	description = "Front Line Workers Prov Policy"
@@ -45,4 +39,4 @@ $params = @{
 	cloudPcNamingTemplate = "FLW-%USERNAME:5%-%RAND:5%"
 }
 
-New-MgDeviceManagementVirtualEndpointProvisioningPolicy -BodyParameter $params
+New-MgBetaDeviceManagementVirtualEndpointProvisioningPolicy -BodyParameter $params
