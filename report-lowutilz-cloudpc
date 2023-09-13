@@ -1,17 +1,11 @@
 #Install Microsoft Graph Module
-Install-Module Microsoft.Graph
+Install-Module Microsoft.Graph.Beta
 
 #Read-only  Scope
 Connect-MgGraph -Scopes "CloudPC.Read.All"
 
 #Read-Write Scope
 Connect-MgGraph -Scopes "CloudPC.ReadWrite.All"
-
-#Beta APIs
-Select-MgProfile -Name "beta"
-
-#Production APIs
-Select-MgProfile -Name "v1.0"
 
 $params = @{
 	Top = 25
@@ -26,6 +20,6 @@ $params = @{
 	)
 }
 
-Get-MgDeviceManagementVirtualEndpointReportTotalAggregatedRemoteConnectionReport -BodyParameter $params
+Get-MgBetaDeviceManagementVirtualEndpointReportTotalAggregatedRemoteConnectionReport -BodyParameter $params
 
 # OutFile you will have to enter the path you want to save the csv file. (e.g. c:\temp\abc.csv)
