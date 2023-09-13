@@ -1,6 +1,6 @@
 # Import module Az and MS Graph
 Import-Module Az.Accounts
-Install-Module Microsoft.Graph
+Install-Module Microsoft.Graph.Beta
 
 # Connect to the Azure Subcription
 Connect-AzAccount
@@ -56,7 +56,7 @@ $params = @{
     subnetId = "$win365SubID"
 }
 
-New-MgDeviceManagementVirtualEndpointOnPremisesConnection -BodyParameter $params -Debug
+New-MgBetaDeviceManagementVirtualEndpointOnPremiseConnection -BodyParameter $params -Debug
 }
 catch
 {
