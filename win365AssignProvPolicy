@@ -1,17 +1,11 @@
 #Install Microsoft Graph Module
-Install-Module Microsoft.Graph
+Install-Module Microsoft.Graph.Beta
 
 #Read-only  Scope
 Connect-MgGraph -Scopes "CloudPC.Read.All"
 
 #Read-Write Scope
 Connect-MgGraph -Scopes "CloudPC.ReadWrite.All"
-
-#Beta APIs
-Select-MgProfile -Name "beta"
-
-#Production APIs
-Select-MgProfile -Name "v1.0"
 
 #Get the Provisioning Policy ID
 Get-MgDeviceManagementVirtualEndpointProvisioningPolicy
@@ -29,4 +23,4 @@ $params = @{
 	)
 }
 
-Set-MgDeviceManagementVirtualEndpointProvisioningPolicy -CloudPcProvisioningPolicyId "6d54435b-74cd-XXXX-XXXX-7d9b5cc0a78d" -BodyParameter $params
+Set-MgBetaDeviceManagementVirtualEndpointProvisioningPolicy -CloudPcProvisioningPolicyId "6d54435b-74cd-XXXX-XXXX-7d9b5cc0a78d" -BodyParameter $params
