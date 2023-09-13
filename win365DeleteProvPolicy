@@ -24,7 +24,7 @@ $params = @{
 }
 
 #Unassign the AAG group from the CPC Provisioning Policy before deletion
-Set-MgDeviceManagementVirtualEndpointProvisioningPolicy -CloudPcProvisioningPolicyId "6d54435b-74cd-XXXX-XXXX-7d9b5cc0a78d" -BodyParameter $params
+Set-MgBetaDeviceManagementVirtualEndpointProvisioningPolicy -CloudPcProvisioningPolicyId "6d54435b-74cd-XXXX-XXXX-7d9b5cc0a78d" -BodyParameter $params
 
 #Delete the CPC Provisioning Policy
 Remove-MgBetaDeviceManagementVirtualEndpointProvisioningPolicy -CloudPcProvisioningPolicyId "6d54435b-74cd-XXXX-XXXX-7d9b5cc0a78d"
