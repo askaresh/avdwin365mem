@@ -39,9 +39,6 @@ $win365SubID = Get-AzVirtualNetworkSubnetConfig -Name "W365Workload-Sub01" -Virt
 # Connec to MS Graph for Cloud PC W365
 Connect-MgGraph -Scopes "CloudPC.ReadWrite.All"
 
-# Select Beta Profile for Cloud PC APIs
-Select-MgProfile -Name "beta"
-
 # Create the ANC for Windows 365 with AAD join type
 try
 {
