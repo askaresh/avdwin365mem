@@ -1,0 +1,34 @@
+#Install Microsoft Graph Module
+Install-Module Microsoft.Graph.Beta
+
+#Import the Module for this report
+Import-Module Microsoft.Graph.Beta.DeviceManagement.Actions
+
+#Read-Write Scope
+Connect-MgGraph -Scopes "CloudPC.ReadWrite.All" -NoWelcome
+
+#Validate the logged in account
+Get-MgBetaUser -UserId username@domain.com
+
+$params = @{
+	top = 50
+	skip = 0
+	search = ""
+	filter = ""
+	select = @(
+		"Id"
+		"CloudPcId"
+		"CloudPcDeviceDisplayName"
+		"DeviceOwnerUserPrincipalName"
+		"Action"
+		"ActionState"
+		"InitiatedByUserPrincipalName"
+		"RequestDateTime"
+		"LastUpdatedDateTime"
+	)
+	orderBy = @(
+		"LastUpdatedDateTime desc"
+	)
+}
+
+Get-MgBetaDeviceManagementVirtualEndpointReportActionStatusReport -BodyParameter $params
