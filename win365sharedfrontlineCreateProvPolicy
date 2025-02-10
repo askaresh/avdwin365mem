@@ -1,0 +1,42 @@
+#############################################################################################
+# Windows 365 Frontline Shared Cloud Provisioning Policy via Powershell
+# Comment or Un-comment the components that does not apply to your environment
+# Author - Aresh Sarkari - https://twitter.com/askaresh
+#############################################################################################
+
+#Install Microsoft Graph Module
+Install-Module Microsoft.Graph.Beta
+
+#Read-only  Scope
+Connect-MgGraph -Scopes "CloudPC.Read.All"
+
+#Read-Write Scope
+Connect-MgGraph -Scopes "CloudPC.ReadWrite.All"
+
+$params = @{
+	displayName = "Demo-Shared-FrontLine"
+	description = "Shared Front Line Workers Prov Policy"
+	provisioningType = "sharedByEntraGroup"
+	managedBy = "windows365"
+	imageId = "microsoftwindowsdesktop_windows-ent-cpc_win11-24H2-ent-cpc-m365"
+	imageDisplayName = "Windows 11 Enterprise + Microsoft 365 Apps 24H2"
+	imageType = "gallery"
+	microsoftManagedDesktop = @{
+		type = "notManaged"
+		profile = $null
+	}
+	enableSingleSignOn = $true
+	domainJoinConfigurations = @(
+		@{
+			type = "azureADJoin"
+			regionGroup = "australia"
+			regionName = "australiaeast"
+		}
+	)
+	windowsSettings = @{
+		language = "en-US"
+	}
+	cloudPcNamingTemplate = "FLWS-%RAND:10%"
+}
+
+New-MgBetaDeviceManagementVirtualEndpointProvisioningPolicy -BodyParameter $params
