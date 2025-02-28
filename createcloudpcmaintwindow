@@ -1,0 +1,46 @@
+# Ensure the Microsoft.Graph.Beta module is installed
+if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Beta)) {
+    Write-Host "Installing Microsoft.Graph.Beta module..." -ForegroundColor Cyan
+    Install-Module Microsoft.Graph.Beta -Force -AllowClobber
+}
+Import-Module Microsoft.Graph.Beta
+
+# Connect to Microsoft Graph with the required permissions for maintenance operations
+Write-Host "Connecting to Microsoft Graph..." -ForegroundColor Cyan
+Connect-MgGraph -Scopes "CloudPC.ReadWrite.All" -NoWelcome
+
+# Define the endpoint for Cloud PC maintenance windows
+$uri = "beta/deviceManagement/virtualEndpoint/maintenanceWindows"
+
+# Construct the JSON payload for the maintenance window
+$maintenancePayload = @{
+    displayName                   = "CloudPC-Window-askaresh"
+    description                   = "A window for test"
+    notificationLeadTimeInMinutes = 60
+    schedules                     = @(
+        @{
+            scheduleType = "weekday"
+            startTime    = "01:00:00.0000000"
+            endTime      = "04:00:00.0000000"
+        },
+        @{
+            scheduleType = "weekend"
+            startTime    = "01:00:00.0000000"
+            endTime      = "04:00:00.0000000"
+        }
+    )
+} | ConvertTo-Json -Depth 5
+
+# Call the Microsoft Graph API to create the maintenance window
+try {
+    Write-Host "Creating Cloud PC maintenance window..." -ForegroundColor Cyan
+    $result = Invoke-MgGraphRequest -Method POST -Uri $uri -Body $maintenancePayload
+    Write-Host "Maintenance window created successfully." -ForegroundColor Green
+    $result | Format-List
+}
+catch {
+    Write-Error "Error creating maintenance window: $_"
+}
+
+# Optionally disconnect from Microsoft Graph when done
+Disconnect-MgGraph
