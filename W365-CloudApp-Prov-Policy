@@ -1,0 +1,246 @@
+<#
+Create (or reuse) a Windows 365 "Cloud Apps" provisioning policy, assign an Entra group
+with size + capacity + label, then verify assignment (via $expand=assignments) and optionally
+poll for provisioned Cloud PCs. Uses Microsoft Graph beta.
+Author - @askaresh
+Key note: /assignments endpoint returns 404 by design; use $expand=assignments. See MS docs.
+#>
+
+# ==========================
+# 0) CONFIG — EDIT THESE
+# ==========================
+$TenantId     = "<Copy/Paste Tenant ID>"
+$ClientId     = "<Copy/Paste Client ID>"
+$ClientSecret = "<Copy/Paste ClientSecret ID>"
+
+# Policy
+$DisplayName  = "Cloud-Apps-Prov-4"
+$Description  = "Cloud Apps Prov Policy - Frontline"
+$EnableSSO    = $true
+$RegionName   = "australiaeast"   # or "automatic"
+$Locale       = "en-AU"
+$Language     = "en-AU"
+
+# Image (gallery)
+$ImageType    = "gallery"
+$ImageId      = "microsoftwindowsdesktop_windows-ent-cpc_win11-24H2-ent-cpc-m365"
+
+# Assignment
+$GroupId              = "b582705d-48be-4e4b-baac-90e5b50ebdf2"   # Entra ID Group
+$ServicePlanId        = "057efbfe-a95d-4263-acb0-12b4a31fed8d"   # FL 2vCPU/8GB/128GB
+$AllotmentCount       = 1
+$AllotmentDisplayName = "CP-FL-Shared-CloudApp-1"
+
+# Optional provisioning poll
+$VerifyDesiredCount   = $AllotmentCount
+$VerifyMaxTries       = 30
+$VerifyDelaySec       = 30
+
+# ==========================
+# Helpers
+# ==========================
+function New-GraphUri {
+  param(
+    [Parameter(Mandatory)][string]$Path,        # e.g. "/beta/deviceManagement/virtualEndpoint/provisioningPolicies"
+    [hashtable]$Query
+  )
+  $cleanPath = '/' + ($Path -replace '^\s*/+','' -replace '\s+$','')
+  $b = [System.UriBuilder]::new("https","graph.microsoft.com")
+  $b.Path = $cleanPath
+  if ($Query -and $Query.Count -gt 0) {
+    Add-Type -AssemblyName System.Web -ErrorAction SilentlyContinue | Out-Null
+    $nvc = [System.Web.HttpUtility]::ParseQueryString([string]::Empty)
+    foreach ($k in $Query.Keys) { $nvc.Add($k, [string]$Query[$k]) }
+    $b.Query = $nvc.ToString()
+  } else { $b.Query = "" }
+  return $b.Uri.AbsoluteUri
+}
+
+function Invoke-Graph {
+  param(
+    [Parameter(Mandatory)][ValidateSet('GET','POST','PATCH','DELETE','PUT')][string]$Method,
+    [Parameter(Mandatory)][string]$Uri,
+    [hashtable]$Headers,
+    $Body
+  )
+  try {
+    if ($PSBoundParameters.ContainsKey('Body')) {
+      return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $Headers -Body ($Body | ConvertTo-Json -Depth 20)
+    } else {
+      return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $Headers
+    }
+  } catch {
+    Write-Warning "HTTP $Method $Uri failed: $($_.Exception.Message)"
+    try {
+      $resp = $_.Exception.Response
+      if ($resp -and $resp.GetResponseStream()) {
+        $reader = New-Object IO.StreamReader($resp.GetResponseStream())
+        $text   = $reader.ReadToEnd()
+        Write-Host "Response body:" -ForegroundColor DarkYellow
+        Write-Host $text
+      }
+    } catch {}
+    throw
+  }
+}
+
+# ==========================
+# 1) AUTH — Client Credentials
+# ==========================
+$TokenEndpoint = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+$tokenForm = @{
+  client_id     = $ClientId
+  client_secret = $ClientSecret
+  scope         = "https://graph.microsoft.com/.default"
+  grant_type    = "client_credentials"
+}
+$auth = Invoke-RestMethod -Method Post -Uri $TokenEndpoint -Body $tokenForm -ContentType 'application/x-www-form-urlencoded'
+if (-not $auth.access_token) { throw "No access_token returned. Ensure CloudPC.ReadWrite.All (+ CloudPC.Read.All) are admin-consented." }
+
+$Headers = @{
+  Authorization = "Bearer $($auth.access_token)"
+  "Content-Type" = "application/json"
+  "Prefer"       = "include-unknown-enum-members"
+}
+
+# Base paths
+$PoliciesPath = "/beta/deviceManagement/virtualEndpoint/provisioningPolicies"
+$CloudPcsPath = "/beta/deviceManagement/virtualEndpoint/cloudPCs"
+
+# ==========================
+# 2) Ensure (Get-or-Create) the policy
+# ==========================
+$escapedName = $DisplayName.Replace("'","''")
+$findUri     = New-GraphUri -Path $PoliciesPath -Query @{ '$filter' = "displayName eq '$escapedName'" }
+
+Write-Host "Finding policy by name: $DisplayName" -ForegroundColor Cyan
+try { $existing = Invoke-Graph -Method GET -Uri $findUri -Headers $Headers }
+catch { Write-Warning "Name lookup failed; proceeding to create."; $existing = $null }
+
+if ($existing -and $existing.value -and $existing.value.Count -gt 0) {
+  $policy   = $existing.value | Select-Object -First 1
+  $policyId = $policy.id
+  Write-Host "Using existing policy '$DisplayName' (id: $policyId)" -ForegroundColor Yellow
+} else {
+  $createBody = @{
+    "@odata.type"           = "#microsoft.graph.cloudPcProvisioningPolicy"
+    displayName             = $DisplayName
+    description             = $Description
+    enableSingleSignOn      = $EnableSSO
+    imageType               = $ImageType
+    imageId                 = $ImageId
+    managedBy               = "windows365"
+    microsoftManagedDesktop = @{
+      "@odata.type" = "microsoft.graph.microsoftManagedDesktop"
+      managedType   = "notManaged"
+    }
+    windowsSetting          = @{
+      "@odata.type" = "microsoft.graph.cloudPcWindowsSetting"
+      locale        = $Locale
+    }
+    windowsSettings         = @{
+      "@odata.type" = "microsoft.graph.cloudPcWindowsSettings"
+      language      = $Language
+    }
+    userExperienceType      = "cloudApp"
+    provisioningType        = "sharedByEntraGroup"
+    domainJoinConfigurations = @(
+      @{
+        "@odata.type"  = "microsoft.graph.cloudPcDomainJoinConfiguration"
+        domainJoinType = "azureADJoin"
+        type           = "azureADJoin"
+        regionName     = $RegionName
+      }
+    )
+  }
+
+  $createUri = New-GraphUri -Path $PoliciesPath
+  Write-Host "Creating policy '$DisplayName'..." -ForegroundColor Cyan
+  $policy   = Invoke-Graph -Method POST -Uri $createUri -Headers $Headers -Body $createBody
+  $policyId = $policy.id
+  if (-not $policyId) { throw "Create succeeded but no policy id returned." }
+  Write-Host "Created policy id: $policyId" -ForegroundColor Green
+}
+
+# ==========================
+# 3) Assign — group + size + capacity + label
+# ==========================
+$assignUri = New-GraphUri -Path ($PoliciesPath + "/$policyId/assign")
+
+Write-Host "Clearing existing assignments..." -ForegroundColor DarkGray
+Invoke-Graph -Method POST -Uri $assignUri -Headers $Headers -Body @{ assignments = @() } | Out-Null
+
+$assignBody = @{
+  assignments = @(
+    @{
+      target = @{
+        "@odata.type"          = "#microsoft.graph.cloudPcManagementGroupAssignmentTarget"
+        groupId                = $GroupId
+        servicePlanId          = $ServicePlanId
+        allotmentLicensesCount = $AllotmentCount
+        allotmentDisplayName   = $AllotmentDisplayName
+      }
+    }
+  )
+}
+Write-Host "Assigning policy to group $GroupId (plan $ServicePlanId, count $AllotmentCount)..." -ForegroundColor Cyan
+Invoke-Graph -Method POST -Uri $assignUri -Headers $Headers -Body $assignBody | Out-Null
+Write-Host "Assignment submitted." -ForegroundColor Green
+
+# ==========================
+# 4) Verify — read policy with $expand=assignments (RETRY)
+# ==========================
+$expandUri = New-GraphUri -Path ($PoliciesPath + "/$policyId") -Query @{ '$expand' = 'assignments' }
+Write-Host "Reading back policy + assignments via $expand..." -ForegroundColor Cyan
+
+$verify = $null
+for ($try=1; $try -le 12; $try++) {
+  try {
+    $verify = Invoke-Graph -Method GET -Uri $expandUri -Headers $Headers
+    if ($verify.assignments -and $verify.assignments.Count -gt 0) { break }
+    Write-Host "Assignments not materialized yet (attempt $try). Waiting 3s..." -ForegroundColor Yellow
+  } catch {
+    Write-Warning "Expand read attempt $try failed; retrying in 3s..."
+  }
+  Start-Sleep -Seconds 3
+}
+if (-not $verify) { throw "Failed to read policy with assignments after retries." }
+
+$verify | ConvertTo-Json -Depth 20 | Write-Output
+
+# Sanity: confirm the expected assignment
+$expected = $verify.assignments | Where-Object {
+  $_.target.groupId -eq $GroupId -and
+  $_.target.servicePlanId -eq $ServicePlanId -and
+  $_.target.allotmentLicensesCount -eq $AllotmentCount -and
+  ($_.target.allotmentDisplayName -eq $AllotmentDisplayName -or -not $AllotmentDisplayName)
+}
+if ($expected) {
+  Write-Host "✅ Assignment present with expected group, plan, and count." -ForegroundColor Green
+} else {
+  Write-Warning "Assignment not found with expected fields. See dump above."
+}
+
+# ==========================
+# 5) (Optional) Poll for provisioned Cloud PCs for this policy
+# ==========================
+if ($VerifyDesiredCount -gt 0) {
+  $cloudPcsUri = New-GraphUri -Path $CloudPcsPath -Query @{ '$filter' = "provisioningPolicyId eq '$policyId'" }
+  for ($i = 1; $i -le $VerifyMaxTries; $i++) {
+    try {
+      $cloudPcs   = Invoke-Graph -Method GET -Uri $cloudPcsUri -Headers $Headers
+      $pcsForPlan = $cloudPcs.value | Where-Object { $_.servicePlanId -eq $ServicePlanId -or -not $_.psobject.Properties.Name.Contains('servicePlanId') }
+      $count      = ($pcsForPlan | Measure-Object).Count
+      if ($count -ge $VerifyDesiredCount) {
+        Write-Host "Provisioned Cloud PCs for policy: $count (target $VerifyDesiredCount) ✅" -ForegroundColor Green
+        $pcsForPlan | ConvertTo-Json -Depth 10 | Write-Output
+        break
+      } else {
+        Write-Host "Provisioned Cloud PCs for policy: $count (waiting for $VerifyDesiredCount) … attempt $i/$VerifyMaxTries" -ForegroundColor Yellow
+      }
+    } catch {
+      Write-Warning "Provisioning check failed on attempt ${i}: $($_.Exception.Message)"
+    }
+    Start-Sleep -Seconds $VerifyDelaySec
+  }
+}
