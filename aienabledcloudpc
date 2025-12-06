@@ -1,0 +1,415 @@
+<#
+.SYNOPSIS
+    Fully automates the deployment of AI-enabled Windows 365 Cloud PCs using Microsoft Graph REST APIs.
+
+.DESCRIPTION
+    This script creates:
+    1. A Cloud PC Configuration profile with AI features enabled (using undocumented settingProfiles API)
+    2. A Provisioning Policy for Windows 365 Enterprise Cloud PCs
+    3. Assigns both policies to a specified Entra ID security group
+
+    Key Discovery: The AI enablement setting uses an undocumented API endpoint:
+    - Endpoint: POST /beta/deviceManagement/virtualEndpoint/settingProfiles
+    - Setting ID: W365.CloudPCConfiguration.AI.IsEnabled
+
+.NOTES
+    Author: Your Name
+    Date: December 2025
+    Version: 1.0
+
+    Requirements:
+    - App Registration with permissions: CloudPC.ReadWrite.All, DeviceManagementConfiguration.ReadWrite.All, Group.Read.All
+    - Windows 365 Enterprise licenses (8vCPU/32GB/256GB minimum for AI features)
+    - Users must be registered with Windows Insider Program (Beta Channel)
+
+.LINK
+    https://techcommunity.microsoft.com/blog/windows-itpro-blog/experience-next-gen-productivity-with-windows-365-ai-enabled-cloud-pcs/4467875
+#>
+
+# ==============================================================================
+# CONFIGURATION - UPDATE THESE VALUES
+# ==============================================================================
+$TenantId        = "a02eXXXXXXXXXXXXXXXXXXXXXXXXXX61"
+$ClientId        = "40aXXXXXXXXXXXXXXXXXXXXXXXXXX0b"
+$ClientSecret    = "w~_8QXXXXXXXXXXXXXXXXXXXXXXXXXXXXceD"
+
+# Target Group
+$GroupId         = "01XXXXXXXXXXXXXXXXXXXXXXXXXX12"
+
+# Cloud PC Configuration
+$ConfigDisplayName    = "AI-Enabled-CloudPC-Config"
+$ConfigDescription    = "Cloud PC Configuration with AI features enabled"
+
+# Provisioning Policy
+$PolicyDisplayName    = "AI-Enabled-ProvPolicy"
+$PolicyDescription    = "Provisioning policy for AI-enabled Windows 365 Cloud PCs"
+$RegionName           = "australiaeast"
+$Language             = "en-US"
+$ImageId              = "microsoftwindowsdesktop_windows-ent-cpc_win11-24h2-ent-cpc-m365"
+$ImageDisplayName     = "Windows 11 Enterprise + Microsoft 365 Apps 24H2"
+
+# ==============================================================================
+# HELPER FUNCTIONS
+# ==============================================================================
+
+function Write-Step {
+    param([string]$Message)
+    Write-Host ""
+    Write-Host ("=" * 60) -ForegroundColor Cyan
+    Write-Host $Message -ForegroundColor Cyan
+    Write-Host ("=" * 60) -ForegroundColor Cyan
+}
+
+function Write-Success {
+    param([string]$Message)
+    Write-Host "[OK] $Message" -ForegroundColor Green
+}
+
+function Write-Info {
+    param([string]$Message)
+    Write-Host "[INFO] $Message" -ForegroundColor Yellow
+}
+
+function Invoke-GraphRequest {
+    param(
+        [Parameter(Mandatory)][ValidateSet("GET","POST","PATCH","DELETE")][string]$Method,
+        [Parameter(Mandatory)][string]$Uri,
+        [hashtable]$Headers,
+        $Body
+    )
+    
+    try {
+        $params = @{
+            Method  = $Method
+            Uri     = $Uri
+            Headers = $Headers
+        }
+        
+        if ($Body) {
+            $params.Body = $Body | ConvertTo-Json -Depth 20
+        }
+        
+        return Invoke-RestMethod @params
+    }
+    catch {
+        Write-Host "[ERROR] API Call Failed: $($_.Exception.Message)" -ForegroundColor Red
+        
+        try {
+            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+            $responseBody = $reader.ReadToEnd()
+            Write-Host "Response: $responseBody" -ForegroundColor DarkYellow
+        } catch {}
+        
+        throw
+    }
+}
+
+# ==============================================================================
+# STEP 1: AUTHENTICATION
+# ==============================================================================
+Write-Step "Step 1: Authenticating to Microsoft Graph API"
+
+$TokenEndpoint = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+
+$tokenForm = @{
+    client_id     = $ClientId
+    client_secret = $ClientSecret
+    scope         = "https://graph.microsoft.com/.default"
+    grant_type    = "client_credentials"
+}
+
+try {
+    $authResponse = Invoke-RestMethod -Method Post -Uri $TokenEndpoint -Body $tokenForm -ContentType "application/x-www-form-urlencoded"
+    
+    if (-not $authResponse.access_token) {
+        throw "No access token returned. Check your App Registration and permissions."
+    }
+    
+    Write-Success "Authentication successful"
+}
+catch {
+    Write-Host "[ERROR] Authentication failed: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
+
+$Headers = @{
+    "Authorization"    = "Bearer $($authResponse.access_token)"
+    "Content-Type"     = "application/json"
+    "ConsistencyLevel" = "eventual"
+}
+
+# ==============================================================================
+# STEP 2: CREATE CLOUD PC CONFIGURATION (AI-ENABLED)
+# ==============================================================================
+Write-Step "Step 2: Creating Cloud PC Configuration with AI Features Enabled"
+
+$settingProfilesUri = "https://graph.microsoft.com/beta/deviceManagement/virtualEndpoint/settingProfiles"
+
+Write-Info "Checking for existing Cloud PC Configuration..."
+
+$configId = $null
+
+try {
+    $existingConfigs = Invoke-GraphRequest -Method GET -Uri $settingProfilesUri -Headers $Headers
+    $existingConfig = $existingConfigs.value | Where-Object { $_.displayName -eq $ConfigDisplayName }
+    
+    if ($existingConfig) {
+        Write-Info "Configuration already exists (ID: $($existingConfig.id))"
+        $configId = $existingConfig.id
+    }
+}
+catch {
+    Write-Info "No existing configuration found, creating new one..."
+}
+
+if (-not $configId) {
+    $configBody = @{
+        displayName       = $ConfigDisplayName
+        description       = $ConfigDescription
+        profileType       = "template"
+        templateId        = "W365.CloudPCConfiguration"
+        settings          = @(
+            @{
+                "@odata.type"         = "#microsoft.graph.cloudPcBooleanSetting"
+                dataType              = "boolean"
+                settingDefinitionId   = "W365.CloudPCConfiguration.AI.IsEnabled"
+                platform              = "all"
+                isEnabled             = $true
+            }
+        )
+        assignments       = @(
+            @{
+                groupId    = $GroupId
+                assignType = "group"
+            }
+        )
+        roleScopeTagIds   = @("0")
+    }
+    
+    Write-Info "Creating Cloud PC Configuration..."
+    Write-Host "  - Display Name: $ConfigDisplayName"
+    Write-Host "  - AI Enabled: True"
+    Write-Host "  - Assigned Group: $GroupId"
+    
+    try {
+        $configResult = Invoke-GraphRequest -Method POST -Uri $settingProfilesUri -Headers $Headers -Body $configBody
+        $configId = $configResult.id
+        Write-Success "Cloud PC Configuration created successfully!"
+        Write-Host "  - Configuration ID: $configId" -ForegroundColor Gray
+    }
+    catch {
+        Write-Host "[ERROR] Failed to create Cloud PC Configuration" -ForegroundColor Red
+        throw
+    }
+}
+
+# ==============================================================================
+# STEP 3: CREATE PROVISIONING POLICY (FIXED)
+# ==============================================================================
+Write-Step "Step 3: Creating Provisioning Policy"
+
+$provisioningPoliciesUri = "https://graph.microsoft.com/beta/deviceManagement/virtualEndpoint/provisioningPolicies"
+
+# 1. VALIDATE IMAGE ID
+# We need to find the correct ID for 24H2 in your region, or the policy will fail validation.
+Write-Info "Validating Image ID for '$RegionName'..."
+try {
+    $galleryUri = "https://graph.microsoft.com/beta/deviceManagement/virtualEndpoint/galleryImages"
+    $galleryImages = Invoke-GraphRequest -Method GET -Uri $galleryUri -Headers $Headers
+    
+    # Try to find 24H2 first
+    $targetImage = $galleryImages.value | Where-Object { $_.displayName -like "*24H2*" -and $_.displayName -like "*Microsoft 365 Apps*" } | Select-Object -First 1
+    
+    if ($targetImage) {
+        Write-Success "Found 24H2 Image: $($targetImage.displayName)"
+        $ImageId = $targetImage.id
+        $ImageDisplayName = $targetImage.displayName
+    }
+    else {
+        # Fallback to 23H2 if 24H2 is not yet published in this region
+        Write-Info "24H2 image not found in gallery. Falling back to 23H2..."
+        $targetImage = $galleryImages.value | Where-Object { $_.displayName -like "*23H2*" -and $_.displayName -like "*Microsoft 365 Apps*" } | Select-Object -First 1
+        
+        if ($targetImage) {
+            $ImageId = $targetImage.id
+            $ImageDisplayName = $targetImage.displayName
+            Write-Success "Using Image: $ImageDisplayName"
+        } else {
+            throw "Could not find any suitable Windows 11 + M365 Apps image in the gallery."
+        }
+    }
+}
+catch {
+    Write-Host "[WARN] Could not validate image ID dynamically. Using default: $ImageId" -ForegroundColor Yellow
+}
+
+# 2. CHECK EXISTING POLICY
+Write-Info "Checking for existing Provisioning Policy..."
+$policyId = $null
+
+try {
+    $existingPolicies = Invoke-GraphRequest -Method GET -Uri $provisioningPoliciesUri -Headers $Headers
+    $existingPolicy = $existingPolicies.value | Where-Object { $_.displayName -eq $PolicyDisplayName }
+    
+    if ($existingPolicy) {
+        Write-Info "Provisioning Policy already exists (ID: $($existingPolicy.id))"
+        $policyId = $existingPolicy.id
+    }
+}
+catch {
+    Write-Info "No existing policy found, creating new one..."
+}
+
+# 3. CREATE POLICY
+if (-not $policyId) {
+    $policyBody = @{
+        "@odata.type"             = "#microsoft.graph.cloudPcProvisioningPolicy"
+        displayName               = $PolicyDisplayName
+        description               = $PolicyDescription
+        provisioningType          = "dedicated"
+        managedBy                 = "windows365"
+        imageId                   = $ImageId
+        imageDisplayName          = $ImageDisplayName
+        imageType                 = "gallery"
+        enableSingleSignOn        = $true
+        
+        # FIXED: Plural Key, Array Value
+        domainJoinConfigurations  = @(
+            @{
+                "@odata.type"    = "microsoft.graph.cloudPcDomainJoinConfiguration"
+                domainJoinType   = "azureADJoin"
+                regionName       = $RegionName
+            }
+        )
+
+        # FIXED: Plural Key, using 'language' property (removed 'locale')
+        windowsSettings           = @{
+            "@odata.type" = "microsoft.graph.cloudPcWindowsSettings"
+            language      = "en-US"
+        }
+    }
+    
+    Write-Info "Creating Provisioning Policy..."
+    Write-Host "  - Display Name: $PolicyDisplayName"
+    Write-Host "  - Image: $ImageDisplayName"
+    Write-Host "  - Image ID: $ImageId"
+    
+    try {
+        $policyResult = Invoke-GraphRequest -Method POST -Uri $provisioningPoliciesUri -Headers $Headers -Body $policyBody
+        $policyId = $policyResult.id
+        Write-Success "Provisioning Policy created successfully!"
+        Write-Host "  - Policy ID: $policyId" -ForegroundColor Gray
+    }
+    catch {
+        Write-Host "[ERROR] Failed to create Provisioning Policy" -ForegroundColor Red
+        throw
+    }
+}
+
+# ==============================================================================
+# STEP 4: ASSIGN PROVISIONING POLICY TO GROUP
+# ==============================================================================
+Write-Step "Step 4: Assigning Provisioning Policy to Group"
+
+$assignUri = "$provisioningPoliciesUri/$policyId/assign"
+
+$assignBody = @{
+    assignments = @(
+        @{
+            target = @{
+                "@odata.type" = "#microsoft.graph.cloudPcManagementGroupAssignmentTarget"
+                groupId       = $GroupId
+            }
+        }
+    )
+}
+
+Write-Info "Assigning policy to group: $GroupId"
+
+try {
+    Invoke-GraphRequest -Method POST -Uri $assignUri -Headers $Headers -Body $assignBody | Out-Null
+    Write-Success "Provisioning Policy assigned to group successfully!"
+}
+catch {
+    if ($_.Exception.Message -like "*already exists*" -or $_.Exception.Response.StatusCode -eq 409) {
+        Write-Info "Assignment already exists - skipping"
+    }
+    else {
+        Write-Host "[WARN] Assignment warning: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
+# ==============================================================================
+# STEP 5: VERIFY DEPLOYMENT
+# ==============================================================================
+Write-Step "Step 5: Verifying Deployment"
+
+Write-Info "Verifying Cloud PC Configuration..."
+try {
+    $verifyConfigUri = "$settingProfilesUri/$configId"
+    $verifiedConfig = Invoke-GraphRequest -Method GET -Uri $verifyConfigUri -Headers $Headers
+    Write-Success "Cloud PC Configuration verified"
+    Write-Host "  - ID: $($verifiedConfig.id)" -ForegroundColor Gray
+    Write-Host "  - Name: $($verifiedConfig.displayName)" -ForegroundColor Gray
+    Write-Host "  - Assigned: $($verifiedConfig.isAssigned)" -ForegroundColor Gray
+}
+catch {
+    Write-Host "[WARN] Could not verify Cloud PC Configuration" -ForegroundColor Yellow
+}
+
+Write-Info "Verifying Provisioning Policy..."
+try {
+    $verifyPolicyUri = "$provisioningPoliciesUri/$policyId"
+    $verifiedPolicy = Invoke-GraphRequest -Method GET -Uri $verifyPolicyUri -Headers $Headers
+    Write-Success "Provisioning Policy verified"
+    Write-Host "  - ID: $($verifiedPolicy.id)" -ForegroundColor Gray
+    Write-Host "  - Name: $($verifiedPolicy.displayName)" -ForegroundColor Gray
+}
+catch {
+    Write-Host "[WARN] Could not verify Provisioning Policy" -ForegroundColor Yellow
+}
+
+# ==============================================================================
+# SUMMARY
+# ==============================================================================
+Write-Step "Deployment Summary"
+
+Write-Host ""
+Write-Host "========================================================================" -ForegroundColor Green
+Write-Host "           AI-ENABLED CLOUD PC DEPLOYMENT COMPLETE                      " -ForegroundColor Green
+Write-Host "========================================================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "Cloud PC Configuration (AI-Enabled)" -ForegroundColor White
+Write-Host "  ID: $configId" -ForegroundColor Gray
+Write-Host "  Name: $ConfigDisplayName" -ForegroundColor Gray
+Write-Host "  AI Features: ENABLED" -ForegroundColor Green
+Write-Host ""
+Write-Host "Provisioning Policy" -ForegroundColor White
+Write-Host "  ID: $policyId" -ForegroundColor Gray
+Write-Host "  Name: $PolicyDisplayName" -ForegroundColor Gray
+Write-Host "  Region: $RegionName" -ForegroundColor Gray
+Write-Host "  Image: $ImageDisplayName" -ForegroundColor Gray
+Write-Host ""
+Write-Host "Target Group: $GroupId" -ForegroundColor White
+Write-Host ""
+Write-Host "========================================================================" -ForegroundColor Green
+Write-Host "                         NEXT STEPS                                     " -ForegroundColor Green
+Write-Host "========================================================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "1. Ensure users have Windows 365 Enterprise licenses (8vCPU/32GB/256GB+)" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "2. Enroll Cloud PCs in Windows Insider Beta Channel:" -ForegroundColor Yellow
+Write-Host "   - Manual: Settings > Windows Update > Windows Insider Program" -ForegroundColor Gray
+Write-Host "   - Or via Intune Update Ring with Pre-release builds enabled" -ForegroundColor Gray
+Write-Host ""
+Write-Host "3. Wait up to 48 hours for AI features to activate" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "4. Verify AI-enabled status:" -ForegroundColor Yellow
+Write-Host "   - Windows App: Look for AI-enabled tag" -ForegroundColor Gray
+Write-Host "   - Intune: Check Device Essentials for AI-enabled: Yes" -ForegroundColor Gray
+Write-Host "   - Cloud PC: Look for sparkle icon on search bar" -ForegroundColor Gray
+Write-Host ""
+Write-Host "========================================================================" -ForegroundColor Green
+
+$completedTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+Write-Host "Script completed at: $completedTime" -ForegroundColor Gray
